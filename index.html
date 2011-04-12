@@ -1,117 +1,210 @@
 <!doctype html>
 <html>
-<head>
-  <meta charset="UTF-16">
-  <title>unicode dance party</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    html, body { height: 100%; font-family}
-    #credits { font-family: Helvetica, arial, monospace; font-size: 10pt; }
-    #main { width: 500px;
-            height: 500px;
-            text-align: center;
-            position: absolute;
-            left: 50%;
-            top: 50%;
-            margin-left: -250px;
-            margin-top: -250px;
-            font-size: 300px;
-          }
-  </style>
-</head>
-<body>
-    <div id="credits">Playing with <a href="http://netpoetic.com/2011/04/unicode/">Joerg Piringer's unicode demo</a>.  Blame <a href="https://twitter.com/#!/davidascher/status/57587608435437568">David Ascher</a>.  <a href="http://www.archive.org/details/Midislut-Mindfluid11long">Music</a>.</div>
-    <div id="main"></div>
-    <audio id="tunes" autoplay>
-      <source src="http://ia600402.us.archive.org/6/items/Midislut-Mindfluid11long/Midislut-Mindfluid11long.ogg" type="audio/ogg" />
-      <source src="http://ia600402.us.archive.org/6/items/Midislut-Mindfluid11long/Midislut-Mindfluid11long.mp3" type="audio/mpeg" />
-    </audio>
-<script>
+    
+    <head>
+        <meta charset="UTF-16">
+        <title>
+            unicode dance party
+        </title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            html, body { height: 100%; overflow:hidden; } #credits { font-family: Helvetica, arial,
+            monospace; font-size: 10pt; } #main { width: 100%; height: 500px; text-align: center; font-size: 300px; position:relative; top: 50%; margin-top:-250px; text-align:center; vertical-align:center; }
+        </style>
+        <script src="beatdetektor.js" type="text/javascript" charset="utf-8">
+        </script>
+        <script src="fft.js" type="text/javascript" charset="utf-8">
+        </script>
+    </head>
+    
+    <body>
+        <div id="credits">
+            Playing with
+            <a href="http://netpoetic.com/2011/04/unicode/">Joerg Piringer's unicode demo</a>
+            . Blame
+            <a href="https://twitter.com/#!/davidascher/status/57587608435437568">David Ascher</a>
+            .
+            <a href="http://www.archive.org/details/Midislut-Mindfluid11long">Music</a>
+            .
+        </div>
+        <div id="main">
+        </div>
+        <audio id="tunes" autoplay onloadedmetadata="loadedMetadata();">
+            <!-- <source src="http://ia600402.us.archive.org/6/items/Midislut-Mindfluid11long/Midislut-Mindfluid11long.ogg"
+            type="audio/ogg" /> -->
+            <source src="Charles_J_Cliffe-Teknique.ogg"
+            type="audio/ogg" />
+            <source src="http://ia600402.us.archive.org/6/items/Midislut-Mindfluid11long/Midislut-Mindfluid11long.mp3"
+            type="audio/mpeg" />
+        </audio>
+        <script>
+            var audioInfo = {
+                bd: null,
+                kick_det: null,
+                vu: null,
+                m_BeatTimer: 0,
+                m_BeatCounter: 0,
 
-var displayableChars;
+                bufferSize: 0,
+                signal: null,
+                channels: 0,
+                rate: 0,
+                frameBufferLength: 0,
+                fft: null
+            }
+            
+            var bPauseChar = 0;
 
-function load(url, callback) {
-  var xhr = new XMLHttpRequest();
-  xhr.open("GET", url, true);
-  if (xhr.overrideMimeType) {
-    xhr.overrideMimeType("text/plain; charset=UTF-16");
-  }
-  xhr.setRequestHeader("If-Modified-Since", "Fri, 01 Jan 1960 00:00:00 GMT");
-  xhr.onreadystatechange = function(evt) {
-    callback(xhr.responseText);
-  };
-  xhr.send(null);
-}
+            function loadedMetadata() {
+                audioInfo.bd = new BeatDetektor();
+                audioInfo.kick_det = new BeatDetektor.modules.vis.BassKick();
+                audioInfo.vu = new BeatDetektor.modules.vis.VU();
 
-// https://developer.mozilla.org/en/JavaScript/Reference/Global_Objects/String/charAt#Example_3.3a.c2.a0Fixing_charAt_to_support_non-Basic-Multilingual-Plane_%28BMP%29.c2.a0characters
-function getWholeChar (str, i) {
-  var code = str.charCodeAt(i);
+                var audio = document.getElementById('tunes');
 
-  if (isNaN(code)) {
-    return ''; // Position not found
-  }
+                audioInfo.channels = audio.mozChannels;
+                audioInfo.rate = audio.mozSampleRate;
+                audioInfo.frameBufferLength = audio.mozFrameBufferLength;
 
-  if (code < 0xD800 || code > 0xDFFF) {
-    return str.charAt(i);
-  }
+                audioInfo.bufferSize = audioInfo.frameBufferLength / audioInfo.channels;
 
-  // High surrogate (could change last hex to 0xDB7F to treat high private surrogates as single characters)
-  if (0xD800 <= code && code <= 0xDBFF) {
-    if (str.length <= (i+1))  {
-      throw 'High surrogate without following low surrogate';
-    }
-    var next = str.charCodeAt(i+1);
-    if (0xDC00 > next || next > 0xDFFF) {
-      throw 'High surrogate without following low surrogate';
-    }
-    return str.charAt(i)+str.charAt(i+1);
-  }
+                audioInfo.fft = new FFT(audioInfo.bufferSize, audioInfo.rate);
+                audioInfo.signal = new Float32Array(audioInfo.bufferSize);
 
-  // Low surrogate (0xDC00 <= code && code <= 0xDFFF)
-  if (i === 0) {
-    throw 'Low surrogate without preceding high surrogate';
-  }
-  var prev = str.charCodeAt(i-1);
+                audio.addEventListener("MozAudioAvailable", audioWritten, false);
+            }
 
-  // (could change last hex to 0xDB7F to treat high private surrogates as single characters)
-  if (0xD800 > prev || prev > 0xDBFF) {
-    throw 'Low surrogate without preceding high surrogate';
-  }
-  return false; // We can pass over low surrogates now as the second component in a pair which we have already processed
-}
+            function audioWritten(event) {
+                if (audioInfo.fft == null) return;
 
-function hitIt() {
-  var frameFunc = (function() {
-    var pos = 0,
-        div = document.getElementById('main'),
-        max = displayableChars.length - 1,
-        char;
+                var fb = event.frameBuffer;
 
-    return function() {
-      if (pos === max) {
-        return;
-      }
-      char = getWholeChar(displayableChars, pos);
-      pos++
-      if (char !== false) {
-        div.innerHTML = char;
-      }
-    };
-  })();
+                for (var i = 0, fbl = audioInfo.bufferSize; i < fbl; i++) {
+                    // Assuming interlaced stereo channels,
+                    // need to split and merge into a stero-mix mono signal
+                    audioInfo.signal[i] = (fb[2 * i] + fb[2 * i + 1]) / 2;
+                }
 
-  var audio = document.getElementById('tunes');
-  audio.addEventListener('canplay', function() {
-    window.setInterval(frameFunc, 1000/24);
-  }, false);
-}
+                audioInfo.fft.forward(audioInfo.signal);
 
-window.addEventListener('DOMContentLoaded', function() {
-  load('alldisplayablechars.txt',
-       function(text) {
-         displayableChars = text;
-         hitIt();
-       });
-}, false);
-</script>
-</body>
+                var timestamp = event.time;
+
+                audioInfo.bd.process(timestamp, audioInfo.fft.spectrum);
+                // Bass Kick detection
+                audioInfo.kick_det.process(audioInfo.bd);
+
+                bPauseChar -= audioInfo.bd.last_update;
+                if (bPauseChar < 0) bPauseChar = 0;
+
+
+                if (audioInfo.bd.win_bpm_int_lo) {
+                    audioInfo.m_BeatTimer += audioInfo.bd.last_update;
+
+                    if (audioInfo.m_BeatTimer > (60.0 / audioInfo.bd.win_bpm_int_lo)) {
+                        audioInfo.m_BeatTimer -= (60.0 / audioInfo.bd.win_bpm_int_lo);
+                        // clearClr[0] = 0.5 + Math.random() / 2;
+                        // clearClr[1] = 0.5 + Math.random() / 2;
+                        // clearClr[2] = 0.5 + Math.random() / 2;
+                        audioInfo.m_BeatCounter++;
+                        bPauseChar = (60.0 / audioInfo.bd.win_bpm_int_lo)/2.0;
+                    }
+                }
+
+                audioInfo.vu.process(audioInfo.bd, timestamp);
+
+            }
+
+            var displayableChars;
+
+            function load(url, callback) {
+                var xhr = new XMLHttpRequest();
+                xhr.open("GET", url, true);
+                if (xhr.overrideMimeType) {
+                    xhr.overrideMimeType("text/plain; charset=UTF-16");
+                }
+                xhr.setRequestHeader("If-Modified-Since", "Fri, 01 Jan 1960 00:00:00 GMT");
+                xhr.onreadystatechange = function(evt) {
+                    callback(xhr.responseText);
+                };
+                xhr.send(null);
+            }
+
+            // https://developer.mozilla.org/en/JavaScript/Reference/Global_Objects/String/charAt#Example_3.3a.c2.a0Fixing_charAt_to_support_non-Basic-Multilingual-Plane_%28BMP%29.c2.a0characters
+
+
+            function getWholeChar(str, i) {
+                var code = str.charCodeAt(i);
+
+                if (isNaN(code)) {
+                    return ''; // Position not found
+                }
+
+                if (code < 0xD800 || code > 0xDFFF) {
+                    return str.charAt(i);
+                }
+
+                // High surrogate (could change last hex to 0xDB7F to treat high private surrogates as single characters)
+                if (0xD800 <= code && code <= 0xDBFF) {
+                    if (str.length <= (i + 1)) {
+                        throw 'High surrogate without following low surrogate';
+                    }
+                    var next = str.charCodeAt(i + 1);
+                    if (0xDC00 > next || next > 0xDFFF) {
+                        throw 'High surrogate without following low surrogate';
+                    }
+                    return str.charAt(i) + str.charAt(i + 1);
+                }
+
+                // Low surrogate (0xDC00 <= code && code <= 0xDFFF)
+                if (i === 0) {
+                    throw 'Low surrogate without preceding high surrogate';
+                }
+                var prev = str.charCodeAt(i - 1);
+
+                // (could change last hex to 0xDB7F to treat high private surrogates as single characters)
+                if (0xD800 > prev || prev > 0xDBFF) {
+                    throw 'Low surrogate without preceding high surrogate';
+                }
+                return false; // We can pass over low surrogates now as the second component in a pair which we have already processed
+            }
+
+            function hitIt() {
+                var frameFunc = (function() {
+                    var pos = 0,
+                        max = displayableChars.length - 1,
+                        char;
+                        var div = document.getElementById('main');
+
+                    return function() {
+                       // var div = document.getElementById('main'+(audioInfo.m_BeatCounter%2));
+                        if (pos === max) {
+                            return;
+                        }
+                        var sval = 300+parseFloat(600*(audioInfo.vu.vu_levels[0]));
+                        // console.log(sval);
+                        div.style.fontSize = sval+"px";
+                        div.style.marginTop = parseFloat(-(sval/2))+"px";
+                        char = getWholeChar(displayableChars, pos);
+                        if (bPauseChar === 0) pos++
+                        if (char !== false) {
+                            div.innerHTML = char;
+                        }
+                    };
+                })();
+
+                var audio = document.getElementById('tunes');
+                audio.addEventListener('canplay', function() {
+                    window.setInterval(frameFunc, 1000 / 24);
+                }, false);
+            }
+
+            window.addEventListener('DOMContentLoaded', function() {
+                load('alldisplayablechars.txt', function(text) {
+                    displayableChars = text;
+                    hitIt();
+                });
+            }, false);
+        </script>
+    </body>
+
 </html>
